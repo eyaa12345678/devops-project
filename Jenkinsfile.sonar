@@ -1,0 +1,87 @@
+pipeline {
+    agent any
+
+    options {
+        skipDefaultCheckout(true)
+    }
+
+    tools {
+        jdk 'JAVA_HOME'
+        maven 'M2_HOME'
+    }
+
+    stages {
+
+        stage('GIT') {
+            steps {
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: '*/main']],
+                    userRemoteConfigs: [[
+                        url: 'https://github.com/eyaa12345678/devops-project.git',
+                        credentialsId: 'github-https-creds'
+                    ]]
+                ])
+            }
+        }
+
+        stage('Build') {
+            steps {
+                dir('backend') {
+                    sh 'mvn -B clean compile'
+                }
+            }
+        }
+
+        stage('Tests') {
+            steps {
+                dir('backend') {
+                    sh 'mvn -B test'
+                }
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                dir('backend') {
+                    withSonarQubeEnv('SonarQube-WSL') {
+                        sh '''
+                            mvn -B \
+                              clean verify \
+                              org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
+                              -Dsonar.projectKey=devops-project \
+                              -Dsonar.projectName=devops-project
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 10, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        stage('Package') {
+            steps {
+                dir('backend') {
+                    sh 'mvn -B -DskipTests package'
+                    sh 'ls -lh target/*.jar'
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Pipeline SonarQube SUCCESS'
+        }
+
+        failure {
+            echo 'Pipeline SonarQube FAILED'
+        }
+    }
+}
